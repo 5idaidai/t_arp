@@ -50,6 +50,7 @@ struct pc
 }pcGroup[255];
 
 u_char selfMac[6]={0};
+u_long myip;
 pcap_t *adhandle;
 u_long firstip,secondip;
 unsigned int HostNum = 0;
@@ -176,7 +177,9 @@ int GetSelfMac()
             }
             selfMac[i] = *(unsigned char*)(pkt_data+22+i);	
 			printf("%x\n",selfMac[i]);
-            break;
+			myip = *(unsigned long *)(pkt_data+28);
+			//printf("myip=%u",myip);
+            break;			
         }
     }
 	
@@ -214,7 +217,7 @@ void sendArpPacket()
     ah.hardware_add_len = 6;
     ah.protocol_add_len = 4;
     ah.operation_field = htons(ARP_REQUEST);
-    ah.source_ip_add = inet_addr("192.168.1.202");
+    ah.source_ip_add = myip;
  
     for (unsigned long i=0; i<HostNum; i++)
     {
