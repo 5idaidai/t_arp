@@ -3,6 +3,7 @@
 #include "pcap.h"
 #include "remote-ext.h"
 #include <process.h>
+#include <windows.h>
 
 #pragma comment(lib,"wpcap.lib")
 #pragma comment(lib,"Packet.lib")
@@ -55,6 +56,7 @@ pcap_t *adhandle;
 u_long firstip,secondip;
 unsigned int HostNum = 0;
 int flag = FALSE;
+HANDLE mThread;
 
 void usage()
 {   
@@ -64,7 +66,6 @@ void usage()
     return ;
 }
 
-void GetlivePc();
 
 int OpenIf(){	
     int j=0,inum = 0;
@@ -114,10 +115,21 @@ int OpenIf(){
 		fprintf(stderr,"\nUnable to open the adapter. %s is not supported by WinPcap\n", d->name);
         return 0;
     }
-	else return -1;
+
+
+	else       /* 检查数据链路层，为了简单，我们只考虑以太网 */
+    if(pcap_datalink(adhandle) != DLT_EN10MB)
+    {
+        fprintf(stderr,"\nThis program works only on Ethernet networks.\n");
+        /* 释放设备列表 */
+        pcap_freealldevs(alldevs);
+        return -1;
+    }
+	
+	else return 1;
 }
 
-//获得自己主机的MAC地址
+//获得自己主机的IP、MAC地址
 int GetSelfMac()
 {
 	struct pcap_pkthdr * pkt_header;
@@ -198,7 +210,7 @@ int GetSelfMac()
 
 //向局域网内的所有可能的IP地址发送ARP请求包线程
  
-void sendArpPacket()
+unsigned int _stdcall sendArpPacket(void * arglist)
 { 
     unsigned char sendbuf[42];//arp包结构大小
     unsigned long ip;
@@ -220,6 +232,8 @@ void sendArpPacket()
     ah.source_ip_add = myip;
  
     for (unsigned long i=0; i<HostNum; i++)
+	{	
+		for(unsigned long j=0;j<3;j++)
     {
         ip = firstip;
 		ah.dest_ip_add =htonl(htonl(ip) + i);
@@ -236,15 +250,16 @@ void sendArpPacket()
         {
             printf("Request Packet in getmine Error: %d\n",GetLastError());
         }
-		GetlivePc();
+		Sleep(100);
     }
-    Sleep(1000);
+	}
     flag = TRUE;
+	return 0;
 }
 
 //接收ARP响应线程，分析数据包后即可获得活动的主机IP地址等
  
-void GetlivePc()
+unsigned int _stdcall GetlivePc(void * arglist)
 {
     //pcap_t *p=(pcap_t *)lpParameter;
     int res;
@@ -254,14 +269,14 @@ void GetlivePc()
     struct pcap_pkthdr *pkt_header;
     const u_char * pkt_data;
     unsigned char tempMac[6];
-    /*while (true)
+    while (true)
     {
         if(flag)
         {
             printf("扫描完毕，监听线程退出!\n");
             //ExitThread(0);
             break;
-        }*/
+        }
  
         if ((res = pcap_next_ex(adhandle,&pkt_header,&pkt_data)) > 0)
         { 
@@ -289,8 +304,9 @@ void GetlivePc()
                 }
             }
         }
-        Sleep(50);
-    //}
+    }
+	ResumeThread(mThread);
+	return 0;
 }
 
 int main(int argc,char *argv[]){
@@ -299,13 +315,18 @@ int main(int argc,char *argv[]){
         usage();
         return -1;
     }
-	//HANDLE hThread1,hThread2;
+	HANDLE hThread1,hThread2;
 	firstip = inet_addr(argv[1]);
 	secondip = inet_addr(argv[2]);
 	HostNum = htonl(secondip) - htonl(firstip) + 1;
 	//printf("%x %x %d",htonl(secondip),htonl(firstip),HostNum);
 	OpenIf();
 	GetSelfMac();
-	sendArpPacket();
-	return 1;
+	//sendArpPacket();
+	mThread = GetCurrentThread();
+	hThread1 = (HANDLE)_beginthreadex(NULL,0,sendArpPacket,NULL,0,NULL);
+	hThread2 = (HANDLE)_beginthreadex(NULL,0,GetlivePc,NULL,0,NULL);
+	SuspendThread(mThread);
+	ExitThread(0);
+	return 0;
 }
